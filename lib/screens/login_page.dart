@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import '../Service/SupabaseService.dart';
 
 class LoginPage extends StatefulWidget {
@@ -35,21 +36,30 @@ class _LoginPageState extends State<LoginPage> {
         // === SUCCESSFUL LOGIN: NAVIGATE TO DASHBOARD (/home) ===
         if (!mounted) return;
         // Route based on selected role. We'll start with patient first.
-        switch (_selectedRole) {
-          case 'patient':
+        final client = SupabaseService.instance.client;
+        final user = client.auth.currentUser;
+        if (user != null) {
+          final profile = await client
+              .from('users')
+              .select('role')
+              .eq('id', user.id)
+              .maybeSingle();
+          final role = (profile?['role'] as String?)?.toLowerCase();
+          if (role == 'doctor') {
+            final doc = await client
+                .from('doctors')
+                .select('id')
+                .eq('user_id', user.id)
+                .maybeSingle();
+            final hasProfile = doc != null;
+            Navigator.of(context).pushReplacementNamed(
+              hasProfile ? '/doctor_home' : '/doctor_profile',
+            );
+          } else {
             Navigator.of(context).pushReplacementNamed('/home');
-            break;
-          case 'doctor':
-            Navigator.of(context).pushReplacementNamed('/doctors');
-            break;
-          case 'staff':
-            Navigator.of(context).pushReplacementNamed('/staff');
-            break;
-          case 'admin':
-            Navigator.of(context).pushReplacementNamed('/admin');
-            break;
-          default:
-            Navigator.of(context).pushReplacementNamed('/home');
+          }
+        } else {
+          Navigator.of(context).pushReplacementNamed('/home');
         }
         // =======================================================
       } else {
@@ -190,10 +200,6 @@ class _LoginPageState extends State<LoginPage> {
   }
 
   Widget _buildSocialButton(String type) {
-    String url = type == 'google'
-        ? 'https://img.icons8.com/color/48/000000/google-logo.png'
-        : 'https://img.icons8.com/color/48/000000/facebook-new.png';
-
     return InkWell(
       onTap: () {
         // TODO: Implement social sign-in logic
@@ -215,18 +221,12 @@ class _LoginPageState extends State<LoginPage> {
           ],
         ),
         child: Center(
-          child: Image.network(
-            url,
-            height: 30,
-            width: 30,
-            errorBuilder: (context, error, stackTrace) => Text(
-              type == 'google' ? 'G' : 'F',
-              style: TextStyle(
-                fontWeight: FontWeight.bold,
-                fontSize: 20,
-                color: Colors.grey.shade700,
-              ),
-            ),
+          child: FaIcon(
+            type == 'google'
+                ? FontAwesomeIcons.google
+                : FontAwesomeIcons.facebook,
+            color: type == 'google' ? Colors.redAccent : Color(0xFF1877F2),
+            size: 28,
           ),
         ),
       ),

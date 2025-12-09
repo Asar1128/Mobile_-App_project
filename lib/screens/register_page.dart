@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import '../Service/SupabaseService.dart';
+import 'package:postgrest/postgrest.dart';
 
 class RegisterPage extends StatefulWidget {
   const RegisterPage({super.key});
@@ -36,11 +38,104 @@ class _RegisterPageState extends State<RegisterPage> {
           .from('hospitals')
           .select('id,name')
           .order('name');
+      final list = (res as List).cast<Map<String, dynamic>>();
+      debugPrint(
+        '[Register] hospitals query result type: ' + res.runtimeType.toString(),
+      );
+      debugPrint(
+        '[Register] fetched hospitals count: ' + list.length.toString(),
+      );
       setState(() {
-        _hospitals = (res as List).cast<Map<String, dynamic>>();
+        _hospitals = list;
+        // Sanitize selected value so dropdown is enabled
+        final ids = list.map((h) => h['id'] as String).toSet();
+        if (_selectedHospitalId != null && !ids.contains(_selectedHospitalId)) {
+          _selectedHospitalId = null;
+        }
+        if (_selectedHospitalId == null && list.isNotEmpty) {
+          _selectedHospitalId = list.first['id'] as String;
+        }
       });
+      if (list.isEmpty && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('No hospitals found. Please add hospitals first.'),
+          ),
+        );
+      }
+    } on PostgrestException catch (e) {
+      debugPrint(
+        '[Register] fetch hospitals PostgrestException: code=' +
+            (e.code ?? 'null') +
+            ', message=' +
+            e.message +
+            ', details=' +
+            (e.details ?? 'null'),
+      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Hospitals query failed: ' + e.message)),
+        );
+      }
     } catch (e) {
       // Silent fail; user can proceed without hospital for now
+      debugPrint('[Register] fetch hospitals error: ' + e.toString());
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to load hospitals: ' + e.toString())),
+        );
+      }
+    } finally {
+      setState(() => _loadingHospitals = false);
+    }
+  }
+
+  Future<void> _seedHospitals() async {
+    setState(() => _loadingHospitals = true);
+    try {
+      final client = SupabaseService.instance.client;
+      await client.from('hospitals').insert([
+        {
+          'name': 'City General Hospital',
+          'address': '123 Main St',
+          'phone': '+1-555-0100',
+        },
+        {
+          'name': 'Valley Care Clinic',
+          'address': '456 Valley Rd',
+          'phone': '+1-555-0101',
+        },
+        {
+          'name': 'Sunrise Medical Center',
+          'address': '789 Sunrise Ave',
+          'phone': '+1-555-0102',
+        },
+      ]);
+      await _fetchHospitals();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Sample hospitals seeded.')),
+        );
+      }
+    } on PostgrestException catch (e) {
+      debugPrint(
+        '[Register] seed hospitals PostgrestException: ' +
+            e.message +
+            ' details=' +
+            (e.details ?? 'null'),
+      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to seed hospitals: ' + e.message)),
+        );
+      }
+    } catch (e) {
+      debugPrint('[Register] seed hospitals error: ' + e.toString());
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to seed hospitals: ' + e.toString())),
+        );
+      }
     } finally {
       setState(() => _loadingHospitals = false);
     }
@@ -58,6 +153,18 @@ class _RegisterPageState extends State<RegisterPage> {
       return;
     }
 
+    // Ensure a hospital is selected for roles that require it (patient/doctor/staff)
+    if (_selectedRole != 'admin' &&
+        (_selectedHospitalId == null || _selectedHospitalId!.isEmpty)) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please select a hospital for this account.'),
+        ),
+      );
+      return;
+    }
+
     setState(() => _loading = true);
     try {
       final res = await SupabaseService.instance.signUp(
@@ -68,15 +175,8 @@ class _RegisterPageState extends State<RegisterPage> {
       final client = SupabaseService.instance.client;
       if (res.user != null) {
         final userId = res.user!.id;
-        // Create profile row in users table
-        await client.from('users').insert({
-          'id': userId,
-          'email': _emailCtrl.text.trim(),
-          'full_name': _fullNameCtrl.text.trim(),
-          'role': _selectedRole,
-          'hospital_id': _selectedHospitalId,
-        });
-        debugPrint('[Register] inserted users row for ' + userId);
+        // users row is now created by DB trigger (auth.users -> public.users).
+        // Do not insert here to avoid duplicate key errors.
         // Create role row (patients/doctors/staff) to link auth user
         if (_selectedRole == 'patient') {
           await client.from('patients').insert({
@@ -260,10 +360,6 @@ class _RegisterPageState extends State<RegisterPage> {
   }
 
   Widget _buildSocialButton(String type) {
-    String url = type == 'google'
-        ? 'https://img.icons8.com/color/48/000000/google-logo.png'
-        : 'https://img.icons8.com/color/48/000000/facebook-new.png';
-
     return InkWell(
       onTap: () {
         // TODO: Implement social sign-up logic
@@ -285,18 +381,12 @@ class _RegisterPageState extends State<RegisterPage> {
           ],
         ),
         child: Center(
-          child: Image.network(
-            url,
-            height: 30,
-            width: 30,
-            errorBuilder: (context, error, stackTrace) => Text(
-              type == 'google' ? 'G' : 'F',
-              style: TextStyle(
-                fontWeight: FontWeight.bold,
-                fontSize: 20,
-                color: Colors.grey.shade700,
-              ),
-            ),
+          child: FaIcon(
+            type == 'google'
+                ? FontAwesomeIcons.google
+                : FontAwesomeIcons.facebook,
+            color: type == 'google' ? Colors.redAccent : Color(0xFF1877F2),
+            size: 28,
           ),
         ),
       ),
@@ -381,6 +471,9 @@ class _RegisterPageState extends State<RegisterPage> {
                     ? const LinearProgressIndicator()
                     : DropdownButtonFormField<String>(
                         value: _selectedHospitalId,
+                        isExpanded: true,
+                        hint: const Text('Select hospital'),
+                        disabledHint: const Text('No hospitals available'),
                         items: _hospitals
                             .map(
                               (h) => DropdownMenuItem<String>(
@@ -404,6 +497,15 @@ class _RegisterPageState extends State<RegisterPage> {
                           ),
                         ),
                       ),
+                if (!_loadingHospitals && _hospitals.isEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8.0),
+                    child: OutlinedButton.icon(
+                      onPressed: _seedHospitals,
+                      icon: const Icon(Icons.local_hospital_outlined),
+                      label: const Text('Seed sample hospitals'),
+                    ),
+                  ),
                 const SizedBox(height: 20),
 
                 // 3. Full Name Input Field

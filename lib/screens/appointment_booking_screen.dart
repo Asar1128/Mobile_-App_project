@@ -64,28 +64,77 @@ class _AppointmentBookingScreenState extends State<AppointmentBookingScreen> {
           return;
         }
 
-        // Resolve patient and hospital for current user
+        // Ensure a corresponding row exists in public.users for this auth user.
+        // The patients.user_id foreign key references public.users(id).
+        // If a user signs in without using the register flow, we may need to create it here.
+        final existingUserRow = await client
+            .from('users')
+            .select('id')
+            .eq('id', user.id)
+            .maybeSingle();
+        if (existingUserRow == null) {
+          final fullName = _nameCtrl.text.trim();
+          await client.from('users').insert({
+            'id': user.id,
+            'full_name': fullName.isEmpty
+                ? (user.userMetadata?['full_name'] ?? 'Unknown')
+                : fullName,
+            'email': user.email,
+            'role': 'patient',
+          });
+        }
+
+        // 1) Resolve doctor UUID and hospital (source of truth)
+        // Prefer lookup by auth user_id if it's a UUID, otherwise fall back to doctorId
+        Map<String, dynamic>? d;
+        final uuidRegex = RegExp(
+          r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$',
+        );
+        if (uuidRegex.hasMatch(widget.doctor.userId)) {
+          d = await client
+              .from('doctors')
+              .select('id, hospital_id')
+              .eq('user_id', widget.doctor.userId)
+              .maybeSingle();
+        }
+        if (d == null && uuidRegex.hasMatch(widget.doctor.doctorId)) {
+          d = await client
+              .from('doctors')
+              .select('id, hospital_id')
+              .eq('id', widget.doctor.doctorId)
+              .maybeSingle();
+        }
+        if (d == null) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Doctor not found in database')),
+          );
+          return;
+        }
+        final doctorUuid = d['id'] as String;
+        final doctorHospitalId = d['hospital_id'] as String;
+
+        // 2) Ensure patient row exists; if missing, create it and default hospital to doctor's hospital
+        String patientId;
+        String hospitalId;
         final p = await client
             .from('patients')
             .select('id, hospital_id')
             .eq('user_id', user.id)
             .maybeSingle();
         if (p == null) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Patient profile not found')),
-          );
-          return;
-        }
-        final patientId = p['id'] as String;
-        final hospitalId = p['hospital_id'] as String?;
-        if (hospitalId == null) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Hospital not linked to patient')),
-          );
-          return;
+          final inserted = await client
+              .from('patients')
+              .insert({'user_id': user.id, 'hospital_id': doctorHospitalId})
+              .select('id, hospital_id')
+              .single();
+          patientId = inserted['id'] as String;
+          hospitalId = inserted['hospital_id'] as String;
+        } else {
+          patientId = p['id'] as String;
+          hospitalId = (p['hospital_id'] as String?) ?? doctorHospitalId;
         }
 
-        // Choose a tentative schedule (next 2 days at 10:00am) — can be rescheduled
+        // 3) Choose a tentative schedule (next 2 days at 10:00am) — can be rescheduled later
         final now = DateTime.now();
         final scheduledAt = DateTime(now.year, now.month, now.day + 2, 10, 0);
 
@@ -93,7 +142,7 @@ class _AppointmentBookingScreenState extends State<AppointmentBookingScreen> {
         final layer = AppointmentDBLayer(client);
         await layer.requestAppointment(
           patientId: patientId,
-          doctorId: widget.doctor.doctorId,
+          doctorId: doctorUuid,
           hospitalId: hospitalId,
           scheduledAt: scheduledAt,
           createdByUserId: user.id,
@@ -102,7 +151,7 @@ class _AppointmentBookingScreenState extends State<AppointmentBookingScreen> {
         // Optionally: store chief complaint in a note field if supported by schema
         // If not available, this remains as a future enhancement.
 
-        // Navigate to Appointments to show all patient appointments
+        // 4) Navigate to Appointments to show all patient appointments
         if (!mounted) return;
         Navigator.of(context).pushNamed('/appointments');
       } catch (e) {

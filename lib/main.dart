@@ -4,7 +4,7 @@ import 'Service/SupabaseService.dart';
 import 'screens/login_page.dart';
 import 'screens/register_page.dart';
 import 'screens/home_page.dart';
-import 'screens/OnboardingScreen.dart'; 
+import 'screens/OnboardingScreen.dart';
 // Model Management Screens
 import 'screens/appointments_screen.dart';
 import 'screens/doctors_list_screen.dart';
@@ -16,9 +16,10 @@ import 'screens/staff_list_screen.dart';
 // NEW DETAIL SCREENS
 import 'screens/doctor_detail_screen.dart';
 import 'screens/appointment_booking_screen.dart';
+import 'screens/doctor_home_page.dart';
+import 'screens/doctor_profile_onboarding.dart';
 // === FIX 1: Import the Doctor model class for type checking ===
 import 'package:hospital_management_system/Model_Classes/doctor.dart';
-
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -46,13 +47,15 @@ class MyApp extends StatelessWidget {
       initialRoute: '/onboarding',
       routes: {
         // --- Core Authentication Flow ---
-        '/onboarding': (context) => const OnboardingScreen(), 
+        '/onboarding': (context) => const OnboardingScreen(),
         '/login': (context) => const LoginPage(),
         '/register': (context) => const RegisterPage(),
 
         // --- Dashboard and Main Navigation ---
         '/home': (context) => const HomePage(),
-        
+        '/doctor_home': (context) => const DoctorHomePage(),
+        '/doctor_profile': (context) => const DoctorProfileOnboarding(),
+
         // --- Model-Specific Management Screens (Lists) ---
         '/appointments': (context) => const AppointmentsScreen(),
         '/doctors': (context) => const DoctorsListScreen(),
@@ -60,15 +63,17 @@ class MyApp extends StatelessWidget {
         '/records': (context) => const MedicalRecordsScreen(),
         '/prescriptions': (context) => const PrescriptionsScreen(),
         '/hospital_admin': (context) => const HospitalDetailScreen(),
-        '/staff': (context) => const StaffListScreen(), 
+        '/staff': (context) => const StaffListScreen(),
       },
-      
+
       // OnGenerateRoute for screens needing dynamic arguments (like DoctorDetailScreen)
       onGenerateRoute: (settings) {
         if (settings.name == '/doctor_detail') {
           // Type cast now works because Doctor is imported
           final doctor = settings.arguments as Doctor;
-          return MaterialPageRoute(builder: (context) => DoctorDetailScreen(doctor: doctor));
+          return MaterialPageRoute(
+            builder: (context) => DoctorDetailScreen(doctor: doctor),
+          );
         }
         return null;
       },

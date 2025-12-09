@@ -159,6 +159,59 @@ create table if not exists audit_logs (
 
 -- ==========================================================
 -- RLS Policies and helper functions (apply in Supabase)
+-- Trigger: mirror auth.users into public.users on signup
+-- Copy/paste the following into Supabase SQL editor and run.
+-- Note: requires privileges; function runs as definer.
+
+create or replace function public.handle_new_user()
+returns trigger as $$
+begin
+  insert into public.users (id, email, full_name, role)
+  values (
+    new.id,
+    new.email,
+    coalesce(new.raw_user_meta_data->>'full_name', new.email),
+    coalesce(new.raw_user_meta_data->>'role', 'patient')
+  )
+  on conflict (id) do update set
+    email = excluded.email,
+    full_name = excluded.full_name,
+    role = excluded.role;
+  return new;
+end;
+$$ language plpgsql security definer;
+
+drop trigger if exists on_auth_user_created on auth.users;
+create trigger on_auth_user_created
+  after insert on auth.users
+  for each row execute procedure public.handle_new_user();
+
+-- RLS: allow authenticated users to manage their doctor profile rows
+-- Enable RLS on doctors if not already enabled
+alter table if exists public.doctors enable row level security;
+
+-- Allow select for authenticated users (optional but useful)
+drop policy if exists doctors_select_authenticated on public.doctors;
+create policy doctors_select_authenticated on public.doctors
+  for select
+  to authenticated
+  using (true);
+
+-- Allow insert: authenticated user may insert a doctor row for themselves
+drop policy if exists doctors_insert_self on public.doctors;
+create policy doctors_insert_self on public.doctors
+  for insert
+  to authenticated
+  with check (user_id = auth.uid());
+
+-- Allow update: authenticated user may update their own doctor row
+drop policy if exists doctors_update_self on public.doctors;
+create policy doctors_update_self on public.doctors
+  for update
+  to authenticated
+  using (user_id = auth.uid())
+  with check (user_id = auth.uid());
+
 -- ==========================================================
 
 -- Enable RLS on core tables
@@ -166,6 +219,14 @@ alter table if exists appointments enable row level security;
 alter table if exists medical_records enable row level security;
 alter table if exists prescriptions enable row level security;
 alter table if exists visits enable row level security;
+alter table if exists hospitals enable row level security;
+
+-- Allow all authenticated users to read hospitals
+drop policy if exists "read_hospitals_all_auth" on hospitals;
+create policy "read_hospitals_all_auth" on hospitals
+for select using (
+  auth.uid() is not null
+);
 
 -- Helper views to resolve current user role and links
 create or replace view v_current_user as

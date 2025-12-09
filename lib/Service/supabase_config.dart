@@ -1,3 +1,3 @@
-const String SUPABASE_URL = 'https://cumtmigbouqofpkuocxb.supabase.co';
+const String SUPABASE_URL = 'https://rdwewunpvdrkjdfuaern.supabase.co';
 const String SUPABASE_ANON_KEY =
-    'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN1bXRtaWdib3Vxb2Zwa3VvY3hiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjQ3NTMxOTgsImV4cCI6MjA4MDMyOTE5OH0.WcTpAglzbNHmCbt5IH5vO_vwa6FzqsVQXsz8BamluaU';
+    'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJkd2V3dW5wdmRya2pkZnVhZXJuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjQ3NTE3MTUsImV4cCI6MjA4MDMyNzcxNX0.YYdmKWS1pDdkbh90YgFM1b4GD7oz4wtnCFri8cnAI0c';

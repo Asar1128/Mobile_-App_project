@@ -1,14 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:hospital_management_system/utils/dummy_data.dart';
-import 'package:hospital_management_system/screens/appointments_screen.dart';
-import 'package:hospital_management_system/screens/doctors_list_screen.dart';
-import 'package:hospital_management_system/screens/patients_list_screen.dart';
-import 'package:hospital_management_system/screens/records_list_screen.dart';
-import 'package:hospital_management_system/screens/prescriptions_screen.dart';
-import 'package:hospital_management_system/screens/hospital_detail_screen.dart';
+import '../Service/SupabaseService.dart';
+import 'package:intl/intl.dart';
+// Removed unused screen imports to fix lints
 import 'package:hospital_management_system/widgets/app_drawer.dart'; // NEW IMPORT
 import 'package:intl/intl.dart';
-import '../Service/SupabaseService.dart';
+// (duplicate import removed)
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -76,7 +73,6 @@ class _HomePageState extends State<HomePage> {
   }
 
   Widget _buildSectionHeader(String title, {VoidCallback? onViewAll}) {
-    // ... (same as before) ...
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 16.0),
       child: Row(
@@ -93,61 +89,21 @@ class _HomePageState extends State<HomePage> {
           if (onViewAll != null)
             InkWell(
               onTap: onViewAll,
-              child: const Row(
-                children: [
-                  Text(
-                    'View all',
-                    style: TextStyle(
-                      color: Color(0xFF00ACC1),
-                      fontSize: 14,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                  SizedBox(width: 4),
-                  Icon(
-                    Icons.arrow_forward_ios,
+              borderRadius: BorderRadius.circular(8),
+              child: const Padding(
+                padding: EdgeInsets.symmetric(horizontal: 8.0, vertical: 4.0),
+                child: Text(
+                  'View All',
+                  style: TextStyle(
                     color: Color(0xFF00ACC1),
-                    size: 14,
+                    fontWeight: FontWeight.w600,
                   ),
-                ],
+                ),
               ),
             ),
         ],
       ),
     );
-  }
-
-  Future<void> _loadRole() async {
-    try {
-      final client = SupabaseService.instance.client;
-      final user = client.auth.currentUser;
-      if (user == null) {
-        setState(() {
-          _role = null;
-          _services = _allServices; // fallback
-          _loadingRole = false;
-        });
-        return;
-      }
-      final res = await client
-          .from('users')
-          .select('role')
-          .eq('id', user.id)
-          .single();
-      final role = (res['role'] as String?)?.toLowerCase();
-      setState(() {
-        _role = role;
-        _services = _filteredServicesForRole(role);
-        _loadingRole = false;
-      });
-    } catch (e) {
-      // If anything fails, don't block UI; show full set
-      setState(() {
-        _role = null;
-        _services = _allServices;
-        _loadingRole = false;
-      });
-    }
   }
 
   List<Map<String, dynamic>> _filteredServicesForRole(String? role) {
@@ -271,14 +227,106 @@ class _HomePageState extends State<HomePage> {
 
   // Upcoming Appointment Card (Prominent Card)
   Widget _buildUpcomingAppointmentCard(BuildContext context) {
-    final appointment = dummyAppointments.first;
+    final client = SupabaseService.instance.client;
+    final user = client.auth.currentUser;
+    // If not logged in, show a gentle prompt
+    if (user == null) {
+      return _buildUpcomingCardShell(
+        title: 'Upcoming Appointment',
+        subtitle: 'Sign in to see your schedule',
+        trailing: null,
+      );
+    }
 
+    // Fetch the next upcoming appointment for this patient from DB.
+    // Assumes a patients row exists linked by user_id.
+    // We select the soonest future appointment.
+    // Fallback: show a CTA to book.
+    return FutureBuilder<List<dynamic>>(
+      future: client
+          .from('patients')
+          .select('id')
+          .eq('user_id', user.id)
+          .maybeSingle()
+          .then((p) async {
+            if (p == null) return [];
+            final pid = p['id'] as String;
+            final rows = await client
+                .from('appointments')
+                .select(
+                  'id, scheduled_at, doctor:doctors(id, specialization, user:users(id, full_name))',
+                )
+                .gte('scheduled_at', DateTime.now().toIso8601String())
+                .eq('patient_id', pid)
+                .order('scheduled_at', ascending: true)
+                .limit(1);
+            return rows as List<dynamic>;
+          }),
+      builder: (context, snap) {
+        if (snap.connectionState != ConnectionState.done) {
+          return _buildUpcomingCardShell(
+            title: 'Upcoming Appointment',
+            subtitle: 'Loading...',
+            trailing: null,
+          );
+        }
+        final list = snap.data ?? [];
+        if (list.isEmpty) {
+          return _buildUpcomingCardShell(
+            title: 'Upcoming Appointment',
+            subtitle: 'No upcoming appointments',
+            trailing: ElevatedButton(
+              onPressed: () => Navigator.of(context).pushNamed('/doctors'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF00ACC1),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 20,
+                  vertical: 10,
+                ),
+              ),
+              child: const Text('Book Now'),
+            ),
+          );
+        }
+        final appt = list.first as Map<String, dynamic>;
+        final doctor = appt['doctor'] as Map<String, dynamic>?;
+        final docUser = doctor?['user'] as Map<String, dynamic>?;
+        final docName = docUser?['full_name'] ?? 'Doctor';
+        final when = DateTime.parse(appt['scheduled_at'] as String);
+        final subtitle = '${DateFormat('MMM d, h:mm a').format(when)}';
+        return _buildUpcomingCardShell(
+          title: 'Upcoming Appointment',
+          subtitle: 'Dr. $docName · $subtitle',
+          trailing: ElevatedButton(
+            onPressed: () => Navigator.of(context).pushNamed('/appointments'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF00ACC1),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10),
+              ),
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+            ),
+            child: const Text('View All'),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildUpcomingCardShell({
+    required String title,
+    required String subtitle,
+    required Widget? trailing,
+  }) {
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(20),
       margin: const EdgeInsets.only(bottom: 20),
       decoration: BoxDecoration(
-        color: const Color(0xFFE0F7FA), // Very light teal background
+        color: const Color(0xFFE0F7FA),
         borderRadius: BorderRadius.circular(20),
         border: Border.all(color: const Color(0xFF4DD0E1).withOpacity(0.3)),
         boxShadow: [
@@ -292,9 +340,9 @@ class _HomePageState extends State<HomePage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
-            'Upcoming Appointment',
-            style: TextStyle(
+          Text(
+            title,
+            style: const TextStyle(
               fontSize: 16,
               fontWeight: FontWeight.w600,
               color: Color(0xFF00ACC1),
@@ -302,41 +350,15 @@ class _HomePageState extends State<HomePage> {
           ),
           const SizedBox(height: 10),
           Text(
-            'Dr. ${dummyDoctors.first.fullName}',
+            subtitle,
             style: const TextStyle(
-              fontSize: 22,
+              fontSize: 18,
               fontWeight: FontWeight.bold,
               color: Colors.black87,
             ),
           ),
-          const SizedBox(height: 8),
-          Row(
-            children: [
-              const Icon(Icons.access_time, size: 18, color: Colors.black54),
-              const SizedBox(width: 8),
-              Text(
-                '${appointment.timeSlot} | ${DateFormat('MMM d').format(appointment.appointmentDate)}',
-                style: const TextStyle(fontSize: 16, color: Colors.black54),
-              ),
-            ],
-          ),
           const SizedBox(height: 15),
-          ElevatedButton(
-            onPressed: () {
-              Navigator.of(context).pushNamed('/appointments');
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF00ACC1),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(10),
-              ),
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-            ),
-            child: const Text(
-              'View Details',
-              style: TextStyle(color: Colors.white),
-            ),
-          ),
+          if (trailing != null) trailing,
         ],
       ),
     );
@@ -515,28 +537,22 @@ class _HomePageState extends State<HomePage> {
                     ),
                     SizedBox(
                       height: 220,
-                      child: ListView.builder(
-                        scrollDirection: Axis.horizontal,
-                        itemCount: dummyDoctors.length,
-                        itemBuilder: (context, index) {
-                          final doctor = dummyDoctors[index];
-                          return InkWell(
-                            onTap: () {
-                              // Navigate to detailed doctor profile
-                              Navigator.of(
-                                context,
-                              ).pushNamed('/doctor_detail', arguments: doctor);
-                            },
-                            child: _buildDoctorCard({
-                              'name': 'Dr. ${doctor.fullName}',
-                              'specialty': doctor.specialization,
-                              'image': doctor.fullName.contains('Sarah')
-                                  ? 'https://images.unsplash.com/photo-1537368910025-700350fe46c7?q=80&w=150&h=150&fit=crop'
-                                  : 'https://images.unsplash.com/photo-1559839734-2b71f90a6119?q=80&w=150&h=150&fit=crop',
-                            }),
-                          );
-                        },
-                      ),
+                      child: _loadingDoctors
+                          ? const Center(child: CircularProgressIndicator())
+                          : ListView.builder(
+                              scrollDirection: Axis.horizontal,
+                              itemCount: _popularDoctors.length,
+                              itemBuilder: (context, index) {
+                                final doctor = _popularDoctors[index];
+                                return InkWell(
+                                  onTap: () {
+                                    // Navigate to detailed doctor profile
+                                    Navigator.of(context).pushNamed('/doctors');
+                                  },
+                                  child: _buildDoctorCard(doctor),
+                                );
+                              },
+                            ),
                     ),
 
                     const SizedBox(height: 30),
@@ -555,5 +571,69 @@ class _HomePageState extends State<HomePage> {
     super.initState();
     _services = _filteredServicesForRole(null);
     _loadRole();
+    _fetchPopularDoctors();
+  }
+
+  List<Map<String, dynamic>> _popularDoctors = [];
+  bool _loadingDoctors = false;
+
+  Future<void> _fetchPopularDoctors() async {
+    setState(() => _loadingDoctors = true);
+    try {
+      final client = SupabaseService.instance.client;
+      final res = await client
+          .from('doctors')
+          .select('id, specialization, user:users(full_name)')
+          .limit(10);
+      final list = (res as List).cast<Map<String, dynamic>>();
+      setState(() {
+        _popularDoctors = list
+            .map(
+              (d) => {
+                'name':
+                    'Dr. ' +
+                    ((d['user']?['full_name'] as String?) ?? 'Unknown'),
+                'specialty': (d['specialization'] as String?) ?? 'General',
+                // Placeholder images; you can replace with a profile_url field later
+                'image':
+                    'https://images.unsplash.com/photo-1559839734-2b71f90a6119?q=80&w=150&h=150&fit=crop',
+                'id': d['id'] as String,
+              },
+            )
+            .toList();
+      });
+    } catch (e) {
+      // Keep UI usable with empty list; optionally show a snackbar
+    } finally {
+      setState(() => _loadingDoctors = false);
+    }
+  }
+
+  Future<void> _loadRole() async {
+    setState(() => _loadingRole = true);
+    try {
+      final client = SupabaseService.instance.client;
+      final user = client.auth.currentUser;
+      String? role;
+      if (user != null) {
+        final res = await client
+            .from('users')
+            .select('role')
+            .eq('id', user.id)
+            .maybeSingle();
+        role = res?['role'] as String?;
+      }
+      setState(() {
+        _role = role?.toLowerCase();
+        _services = _filteredServicesForRole(_role);
+        _loadingRole = false;
+      });
+    } catch (e) {
+      setState(() {
+        _role = null;
+        _services = _allServices;
+        _loadingRole = false;
+      });
+    }
   }
 }
